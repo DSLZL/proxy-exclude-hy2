@@ -1,56 +1,78 @@
-name: V2RayN Subscription Filter & Save
+name: Process Remote Proxy Subscription
 
 on:
-  workflow_dispatch:
-    inputs:
-      subscription:
-        description: 'Base64 Encoded Subscription'
-        required: true
-        type: string
+  schedule:
+    - cron: '0 0 * * *'  # 每天UTC时间0点自动运行
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   process-subscription:
     runs-on: ubuntu-latest
-    outputs:
-      filtered_subscription: ${{ steps.filter.outputs.result }}
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4  # 确保克隆仓库代码
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Decode Subscription
-        id: decode
-        run: |
-          echo "::set-output name=decoded::$(echo -n "$SUBSCRIPTION" | base64 --decode)"
-        env:
-          SUBSCRIPTION: ${{ github.event.inputs.subscription }}
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
 
-      - name: Filter Nodes and Save File
-        id: filter
-        run: |
-          filtered=$(echo "$INPUT" | grep -v '^hysteria2://')
-          echo -n "$filtered" | base64 -w0 > filtered_subscription.txt
-          echo "::set-output name=result::$(cat filtered_subscription.txt)"
-        env:
-          INPUT: ${{ steps.decode.outputs.decoded }}
+    - name: Fetch and process subscription
+      env:
+        SUBSCRIPTION_URL: https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
+      run: |
+        # 获取原始订阅
+        curl -sL "$SUBSCRIPTION_URL" -o original_sub.txt
 
-      - name: Upload Filtered File
-        uses: actions/upload-artifact@v4
-        with:
-          name: filtered-subscription
-          path: filtered_subscription.txt
+        python - <<EOF
+        import base64
+        import os
 
-      - name: Commit and Push Filtered File
-        env:
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # 配置 Git 远程（使用 GITHUB_TOKEN 授权）
-          git config --global user.email "q2891362919@163.com"
-          git config --global user.name "DSLZL"
-          git remote set-url origin https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+        # 配置路径
+        input_file = 'original_sub.txt'
+        output_file = 'subscription.txt'  # 最终保存文件名
 
-          # 添加文件并提交
-          git add filtered_subscription.txt
-          git commit -m "Auto filtered subscription" || echo "No changes to commit"
+        try:
+            # 读取原始订阅文件
+            with open(input_file, 'r') as f:
+                encoded_content = f.read().strip()
 
-          # 推送到目标分支（默认 main）
-          git push origin ${{ github.ref }}
+            # Base64解码
+            decoded_content = base64.b64decode(encoded_content).decode('utf-8')
+
+            # 过滤hy2协议节点（保留其他协议）
+            filtered_lines = [
+                line for line in decoded_content.splitlines()
+                if not line.lower().startswith('hy2://')
+            ]
+
+            # 重新编码为Base64
+            re_encoded = base64.b64encode(
+                '\n'.join(filtered_lines).encode('utf-8')
+            ).decode('utf-8')
+
+            # 写入新文件
+            with open(output_file, 'w') as f:
+                f.write(re_encoded)
+
+            # 清理临时文件
+            os.remove(input_file)
+
+        except Exception as e:
+            print(f"处理过程中发生错误: {str(e)}")
+            exit(1)
+        EOF
+
+    - name: Commit and push changes
+      run: |
+        # 检测文件是否有变化
+        if git diff --quiet; then
+          echo "没有需要提交的更改"
+          exit 0
+        fi
+
+        git config --global user.name "DSLZL"
+        git config --global user.email "q2891362919@163.com"
+        git add subscription.txt
+        git commit -m "自动更新订阅：已移除所有hy2协议节点 [skip ci]"
+        git push
