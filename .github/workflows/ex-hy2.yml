@@ -40,11 +40,9 @@ jobs:
         run: echo "Filtered subscription saved to 'filtered_subscription.txt'"
 
       - name: Commit and Push Filtered File
-        env:
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.email "q2891362919@163.com"
           git config --global user.name "DSLZL"
           git add filtered_subscription.txt
           git commit -m "Auto filtered subscription" || echo "No changes to commit"
-          git push origin main
+          git push
