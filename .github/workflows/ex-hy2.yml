@@ -32,15 +32,17 @@ jobs:
           # 创建 proxies 目录（如果不存在）
           mkdir -p proxies
           
-          # 示例 Python 脚本（根据实际逻辑修改）
+          # 过滤 Hysteria2 协议节点的 Python 脚本
           python - <<EOF
           with open('external_decoded.txt', 'r') as f:
-              content = f.read()
-              # 这里添加你的处理逻辑（例如过滤、编码等）
-              processed_content = content  # 示例：直接复制内容
+              lines = f.readlines()
           
+          # 过滤掉以 hysteria2:// 开头的行
+          filtered_lines = [line for line in lines if not line.strip().startswith('hysteria2://')]
+          
+          # 写入过滤后的结果
           with open('proxies/encoded.txt', 'w') as f:
-              f.write(processed_content)
+              f.writelines(filtered_lines)
           EOF
 
           # 验证文件是否生成
@@ -71,6 +73,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "没有需要提交的变更"
           else
-            git commit -m "自动更新代理订阅 [skip ci]"
+            git commit -m "自动更新代理订阅（排除 Hysteria2） [skip ci]"
             git push origin HEAD:${GITHUB_REF#refs/heads/}
           fi
