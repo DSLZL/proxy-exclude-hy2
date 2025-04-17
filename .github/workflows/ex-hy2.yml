@@ -1,4 +1,4 @@
-name: V2RayN Subscription Filter
+name: V2RayN Subscription Filter & Save
 
 on:
   workflow_dispatch:
@@ -21,11 +21,30 @@ jobs:
         env:
           SUBSCRIPTION: ${{ github.event.inputs.subscription }}
 
-      - name: Filter Nodes
+      - name: Filter Nodes and Save File
         id: filter
         run: |
-          # 过滤掉所有以hysteria2://开头的行
           filtered=$(echo "$INPUT" | grep -v '^hysteria2://')
-          echo "::set-output name=result::$(echo -n "$filtered" | base64 -w0)"
+          echo -n "$filtered" | base64 -w0 > filtered_subscription.txt
+          echo "::set-output name=result::$(cat filtered_subscription.txt)"
         env:
           INPUT: ${{ steps.decode.outputs.decoded }}
+
+      - name: Upload Filtered File
+        uses: actions/upload-artifact@v3
+        with:
+          name: filtered-subscription
+          path: filtered_subscription.txt
+
+      - name: Show Result
+        run: echo "Filtered subscription saved to 'filtered_subscription.txt'"
+
+      - name: Commit and Push Filtered File
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.email "q2891362919@163.com"
+          git config --global user.name "DSLZL"
+          git add filtered_subscription.txt
+          git commit -m "Auto filtered subscription" || echo "No changes to commit"
+          git push origin main
