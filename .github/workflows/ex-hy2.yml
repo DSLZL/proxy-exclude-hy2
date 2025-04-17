@@ -14,6 +14,9 @@ jobs:
     outputs:
       filtered_subscription: ${{ steps.filter.outputs.result }}
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4  # 确保克隆仓库代码
+
       - name: Decode Subscription
         id: decode
         run: |
@@ -36,13 +39,18 @@ jobs:
           name: filtered-subscription
           path: filtered_subscription.txt
 
-      - name: Show Result
-        run: echo "Filtered subscription saved to 'filtered_subscription.txt'"
-
       - name: Commit and Push Filtered File
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 配置 Git 远程（使用 GITHUB_TOKEN 授权）
           git config --global user.email "q2891362919@163.com"
           git config --global user.name "DSLZL"
+          git remote set-url origin https://x-access-token:${REPO_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+
+          # 添加文件并提交
           git add filtered_subscription.txt
           git commit -m "Auto filtered subscription" || echo "No changes to commit"
-          git push
+
+          # 推送到目标分支（默认 main）
+          git push origin ${{ github.ref }}
