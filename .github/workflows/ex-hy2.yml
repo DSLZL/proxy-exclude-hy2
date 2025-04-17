@@ -1,78 +1,83 @@
-name: Process Remote Proxy Subscription
+name: Process Cross-Repo Proxy Subscription
 
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天UTC时间0点自动运行
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:      # 允许手动触发
 
 jobs:
   process-subscription:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout repository
+    - name: Checkout current repository
       uses: actions/checkout@v4
+      with:
+        persist-credentials: false  # 重要！跨仓库操作时需要
+
+    - name: Get decoded.txt from external repo
+      run: |
+        # 使用Raw URL获取文件
+        curl -sL -o external_decoded.txt \
+          "https://raw.githubusercontent.com/DSLZL/proxy/main/proxies/decoded.txt"
+        
+        # 验证文件获取成功
+        if [ ! -s external_decoded.txt ]; then
+          echo "错误：未能获取外部仓库文件"
+          exit 1
+        fi
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
 
-    - name: Fetch and process subscription
-      env:
-        SUBSCRIPTION_URL: https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
+    - name: Process and encode
       run: |
-        # 获取原始订阅
-        curl -sL "$SUBSCRIPTION_URL" -o original_sub.txt
-
         python - <<EOF
         import base64
         import os
 
-        # 配置路径
-        input_file = 'original_sub.txt'
-        output_file = 'subscription.txt'  # 最终保存文件名
+        input_file = 'external_decoded.txt'
+        output_path = 'proxies/encoded.txt'  # 保存到本仓库的proxies目录
 
         try:
-            # 读取原始订阅文件
+            # 读取外部文件
             with open(input_file, 'r') as f:
-                encoded_content = f.read().strip()
+                content = f.read()
 
-            # Base64解码
-            decoded_content = base64.b64decode(encoded_content).decode('utf-8')
-
-            # 过滤hy2协议节点（保留其他协议）
-            filtered_lines = [
-                line for line in decoded_content.splitlines()
+            # 过滤hy2节点（兼容大小写）
+            filtered = '\n'.join(
+                line for line in content.splitlines()
                 if not line.lower().startswith('hy2://')
-            ]
+            )
 
-            # 重新编码为Base64
-            re_encoded = base64.b64encode(
-                '\n'.join(filtered_lines).encode('utf-8')
-            ).decode('utf-8')
+            # Base64编码
+            encoded = base64.b64encode(filtered.encode()).decode()
 
-            # 写入新文件
-            with open(output_file, 'w') as f:
-                f.write(re_encoded)
+            # 创建目录并写入文件
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'w') as f:
+                f.write(encoded)
 
-            # 清理临时文件
-            os.remove(input_file)
+            print(f"原始节点数: {len(content.splitlines())}")
+            print(f"过滤后节点数: {len(filtered.splitlines())}")
 
         except Exception as e:
-            print(f"处理过程中发生错误: {str(e)}")
+            print(f"处理失败: {str(e)}")
             exit(1)
         EOF
 
-    - name: Commit and push changes
+    - name: Commit and push
       run: |
-        # 检测文件是否有变化
-        if git diff --quiet; then
-          echo "没有需要提交的更改"
-          exit 0
-        fi
+        # 配置Git身份
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
 
-        git config --global user.name "DSLZL"
-        git config --global user.email "q2891362919@163.com"
-        git add subscription.txt
-        git commit -m "自动更新订阅：已移除所有hy2协议节点 [skip ci]"
-        git push
+        # 检测变更并提交
+        git add proxies/encoded.txt
+        if git diff --cached --quiet; then
+          echo "没有需要提交的变更"
+        else
+          git commit -m "自动更新代理订阅 [skip ci]"
+          git push
+        fi
