@@ -1,0 +1,31 @@
+name: V2RayN Subscription Filter
+
+on:
+  workflow_dispatch:
+    inputs:
+      subscription:
+        description: 'Base64 Encoded Subscription'
+        required: true
+        type: string
+
+jobs:
+  process-subscription:
+    runs-on: ubuntu-latest
+    outputs:
+      filtered_subscription: ${{ steps.filter.outputs.result }}
+    steps:
+      - name: Decode Subscription
+        id: decode
+        run: |
+          echo "::set-output name=decoded::$(echo -n "$SUBSCRIPTION" | base64 --decode)"
+        env:
+          SUBSCRIPTION: ${{ github.event.inputs.subscription }}
+
+      - name: Filter Nodes
+        id: filter
+        run: |
+          # 过滤掉所有以hysteria2://开头的行
+          filtered=$(echo "$INPUT" | grep -v '^hysteria2://')
+          echo "::set-output name=result::$(echo -n "$filtered" | base64 -w0)"
+        env:
+          INPUT: ${{ steps.decode.outputs.decoded }}
