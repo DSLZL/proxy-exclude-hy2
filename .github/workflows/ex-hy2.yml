@@ -9,56 +9,68 @@ jobs:
   process-subscription:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        # 关键配置：启用凭证持久化并使用SSH方式
-        persist-credentials: true
-        ssh-key: ${{ secrets.DEPLOY_KEY }}  # 推荐方式（可选）
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
-    - name: Get decoded.txt from external repo
-      run: |
-        # 使用Raw URL获取文件
-        curl -sL -o external_decoded.txt \
-          "https://raw.githubusercontent.com/DSLZL/proxy/main/proxies/decoded.txt"
-        
-        # 验证文件获取成功
-        if [ ! -s external_decoded.txt ]; then
-          echo "错误：未能获取外部仓库文件"
-          exit 1
-        fi
+      - name: Get decoded.txt from external repo
+        run: |
+          curl -sL -o external_decoded.txt "https://raw.githubusercontent.com/DSLZL/proxy/main/proxies/decoded.txt"
+          if [ ! -s external_decoded.txt ]; then
+            echo "错误：未能获取外部仓库文件"
+            exit 1
+          fi
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-    - name: Process and encode
-      run: |
-        python - <<EOF
-        # 保持原有处理逻辑不变...
-        EOF
+      - name: Process and encode
+        run: |
+          # 创建 proxies 目录（如果不存在）
+          mkdir -p proxies
+          
+          # 示例 Python 脚本（根据实际逻辑修改）
+          python - <<EOF
+          with open('external_decoded.txt', 'r') as f:
+              content = f.read()
+              # 这里添加你的处理逻辑（例如过滤、编码等）
+              processed_content = content  # 示例：直接复制内容
+          
+          with open('proxies/encoded.txt', 'w') as f:
+              f.write(processed_content)
+          EOF
 
-    - name: Commit and push
-      env:
-        # 使用自动生成的GITHUB_TOKEN进行认证
-        REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-      run: |
-        # 配置Git身份
-        git config --global user.name "DSLZL"
-        git config --global user.email "q2891362919@163.com"
+          # 验证文件是否生成
+          ls -l proxies/encoded.txt
 
-        # 显示变更差异（调试用）
-        git diff --staged
+      - name: Show files
+        run: |
+          # 显示工作目录内容，确认文件存在
+          tree .
+          cat proxies/encoded.txt  # 验证文件内容
 
-        # 强制使用认证URL进行推送
-        git remote set-url origin $REPO_URL
+      - name: Commit and push
+        env:
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+        run: |
+          git config --global user.name "DSLZL"
+          git config --global user.email "q2891362919@163.com"
 
-        # 提交变更
-        git add proxies/encoded.txt
-        if git diff --cached --quiet; then
-          echo "没有需要提交的变更"
-        else
-          git commit -m "自动更新代理订阅 [skip ci]"
-          git push origin HEAD:${GITHUB_REF#refs/heads/}
-        fi
+          # 显示变更差异（调试用）
+          git status
+          git diff --staged
+
+          # 强制使用认证URL进行推送
+          git remote set-url origin $REPO_URL
+
+          # 添加文件并提交
+          git add proxies/encoded.txt
+          if git diff --cached --quiet; then
+            echo "没有需要提交的变更"
+          else
+            git commit -m "自动更新代理订阅 [skip ci]"
+            git push origin HEAD:${GITHUB_REF#refs/heads/}
+          fi
