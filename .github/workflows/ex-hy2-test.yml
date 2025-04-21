@@ -2,7 +2,7 @@ name: Process Cross-Repo Proxy Subscription
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
