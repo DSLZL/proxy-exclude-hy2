@@ -1,4 +1,4 @@
-name: Process Cross-Repo Proxy Subscription
+name: Process Proxy Subscription
 
 on:
   schedule:
