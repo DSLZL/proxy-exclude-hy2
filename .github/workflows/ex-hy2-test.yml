@@ -1,8 +1,9 @@
-name: Process Proxy Subscription via URL
+name: Process Cross-Repo Proxy Subscription
 
 on:
-  repository_dispatch:
-    types: [check-updates]
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   process-subscription:
@@ -13,54 +14,84 @@ jobs:
         with:
           persist-credentials: true
 
-      - name: Get subscription content
+      - name: Get Base64 encoded content from URL (替换为实际链接)
+        env:
+          ENCODED_CONTENT_URL: "https://example.com/encoded-data"  # 替换为实际的Base64编码内容链接
         run: |
-          # 替换为您的订阅链接
-          SUB_URL="https://example.com/subscription.b64"
-          curl -sL -o subscription.b64 "$SUB_URL"
-          
-          # 使用 Python 解码确保兼容性
-          python -c "import base64; open('external_decoded.txt', 'wb').write(base64.b64decode(open('subscription.b64', 'rb').read()))"
-          
+          # 1. 从链接获取Base64编码的原始内容
+          curl -sL "$ENCODED_CONTENT_URL" > base64_encoded.txt
+
+          # 2. 解码Base64内容到external_decoded.txt
+          cat base64_encoded.txt | base64 -d > external_decoded.txt
+
+          # 3. 验证解码后的内容是否有效
           if [ ! -s external_decoded.txt ]; then
-            echo "❌ 订阅内容解码失败"
+            echo "错误：解码后的内容为空或格式错误"
             exit 1
           fi
+
+          # 可选：显示前几行内容进行调试
+          head -n 3 external_decoded.txt
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Filter and re-encode
+      - name: Process and encode
         run: |
+          # 创建 proxies 目录（如果不存在）
           mkdir -p proxies
+          
+          # 过滤 Hysteria2 并 Base64 编码的 Python 脚本
           python - <<EOF
           import base64
 
           with open('external_decoded.txt', 'r') as f:
-              content = f.read()
+              lines = f.read()  # 读取全部内容（保留原始换行符）
 
-          filtered = '\n'.join(
-              line for line in content.splitlines()
+          # 过滤掉以 hysteria2:// 开头的行
+          filtered_content = '\n'.join([
+              line for line in lines.splitlines()
               if not line.strip().lower().startswith('hysteria2://')
-          )
+          ])
 
+          # Base64 编码过滤后的文本
+          encoded_content = base64.b64encode(filtered_content.encode()).decode()
+
+          # 写入编码后的结果
           with open('proxies/encoded.txt', 'w') as f:
-              f.write(base64.b64encode(filtered.encode()).decode())
+              f.write(encoded_content)
           EOF
 
-      - name: Commit changes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 验证文件是否生成
+          ls -l proxies/encoded.txt
+
+      - name: Show files
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
+          # 显示工作目录内容，确认文件存在
+          tree .
+          cat proxies/encoded.txt  # 验证 Base64 编码内容
+
+      - name: Commit and push
+        env:
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+        run: |
+          git config --global user.name "DSLZL"
+          git config --global user.email "q2891362919@163.com"
+
+          # 显示变更差异（调试用）
+          git status
+          git diff --staged
+
+          # 强制使用认证URL进行推送
+          git remote set-url origin $REPO_URL
+
+          # 添加文件并提交
           git add proxies/encoded.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "🔄 自动更新代理订阅 [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
+          if git diff --cached --quiet; then
+            echo "没有需要提交的变更"
           else
-            echo "⚠️ 无内容变更"
+            git commit -m "自动更新代理订阅（排除 Hysteria2 + Base64 编码） [skip ci]"
+            git push origin HEAD:${GITHUB_REF#refs/heads/}
           fi
