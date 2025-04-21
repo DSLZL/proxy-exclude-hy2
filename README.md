@@ -1,0 +1,1 @@
+[![Process Cross-Repo Proxy Subscription](https://github.com/DSLZL/proxy-exclude-hy2/actions/workflows/ex-hy2-test.yml/badge.svg)](https://github.com/DSLZL/proxy-exclude-hy2/actions/workflows/ex-hy2-test.yml)
