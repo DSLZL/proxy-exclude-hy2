@@ -1,0 +1,66 @@
+name: Process Proxy Subscription via URL
+
+on:
+  repository_dispatch:
+    types: [check-updates]
+
+jobs:
+  process-subscription:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Get subscription content
+        run: |
+          # 替换为您的订阅链接
+          SUB_URL="https://example.com/subscription.b64"
+          curl -sL -o subscription.b64 "$SUB_URL"
+          
+          # 使用 Python 解码确保兼容性
+          python -c "import base64; open('external_decoded.txt', 'wb').write(base64.b64decode(open('subscription.b64', 'rb').read()))"
+          
+          if [ ! -s external_decoded.txt ]; then
+            echo "❌ 订阅内容解码失败"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Filter and re-encode
+        run: |
+          mkdir -p proxies
+          python - <<EOF
+          import base64
+
+          with open('external_decoded.txt', 'r') as f:
+              content = f.read()
+
+          filtered = '\n'.join(
+              line for line in content.splitlines()
+              if not line.strip().lower().startswith('hysteria2://')
+          )
+
+          with open('proxies/encoded.txt', 'w') as f:
+              f.write(base64.b64encode(filtered.encode()).decode())
+          EOF
+
+      - name: Commit changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          git add proxies/encoded.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "🔄 自动更新代理订阅 [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          else
+            echo "⚠️ 无内容变更"
+          fi
