@@ -16,7 +16,7 @@ jobs:
 
       - name: Get Base64 encoded content from URL (替换为实际链接)
         env:
-          ENCODED_CONTENT_URL: "https://example.com/encoded-data"  # 替换为实际的Base64编码内容链接
+          ENCODED_CONTENT_URL: "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2"  # 替换为实际的Base64编码内容链接
         run: |
           # 1. 从链接获取Base64编码的原始内容
           curl -sL "$ENCODED_CONTENT_URL" > base64_encoded.txt
