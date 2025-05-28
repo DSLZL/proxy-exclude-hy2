@@ -1,0 +1,202 @@
+name: Proxy Validator Workflow
+
+on:
+  workflow_dispatch:  # 手动触发
+  schedule:
+    - cron: "0 16 * * *"  # UTC 时间 16:00 = 北京时间 0:00
+    - cron: "0 4 * * *"   # UTC 时间 4:00 = 北京时间 12:00
+
+jobs:
+  validate-proxies:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 获取代码
+        uses: actions/checkout@v3
+
+      - name: 🔍 解密 Base64 文件
+        run: |
+          base64 -d proxies/encoded.txt > proxies/decoded.txt
+          if [ $? -ne 0 ]; then
+            echo "❌ Base64 解密失败"
+            exit 1
+          fi
+
+      - name: 🧩 安装必要工具
+        run: |
+          sudo apt update
+          sudo apt install -y software-properties-common
+          sudo add-apt-repository ppa:max-c-lv/shadowsocks-libev -y
+          sudo apt update
+          sudo apt install -y v2ray-core trojan shadowsocks-libev
+          pip install requests concurrent.futures
+
+      - name: 🧪 多线程测试代理可用性
+        id: proxy-test
+        run: |
+          cat > test_proxies.py << 'EOL'
+          import os
+          import sys
+          import json
+          import base64
+          import subprocess
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+
+          def parse_vless(link):
+              decoded = base64.b64decode(link.split("://")[1]).decode()
+              return json.loads(decoded)
+
+          def parse_vmess(link):
+              decoded = base64.b64decode(link.split("://")[1]).decode()
+              return json.loads(decoded)
+
+          def parse_shadowsocks(link):
+              decoded = base64.b64decode(link.split("://")[1]).decode()
+              parts = decoded.split("@")
+              cipher_pass = parts[0].split(":")
+              return {
+                  "server": parts[1].split(":")[0],
+                  "server_port": parts[1].split(":")[1],
+                  "password": cipher_pass[1],
+                  "method": cipher_pass[0]
+              }
+
+          def parse_trojan(link):
+              parsed = link.split("://")[1].split("@")
+              password = parsed[0]
+              host_port = parsed[1].split(":")
+              return {
+                  "server": host_port[0],
+                  "server_port": host_port[1],
+                  "password": password,
+                  "security": "tls"
+              }
+
+          def test_proxy(proxy_link):
+              try:
+                  protocol = proxy_link.split("://")[0]
+                  if protocol == "vless":
+                      config = parse_vless(proxy_link)
+                      cmd = ["v2ray", "tun", "-config", json.dumps({
+                          "inbounds": [{"tag": "in", "port": 1080 + hash(proxy_link) % 1000, "listen": "127.0.0.1", "protocol": "socks"}],
+                          "outbounds": [{
+                              "protocol": "vless",
+                              "settings": {
+                                  "vnext": [{
+                                      "address": config["address"],
+                                      "port": config["port"],
+                                      "users": [{"id": config["id"], "encryption": config.get("encryption", "none")}]}
+                                  }]
+                              },
+                              "streamSettings": {
+                                  "network": config.get("type", "tcp"),
+                                  "security": config.get("security", "none"),
+                                  "tlsSettings": {"insecure": True} if config.get("security") == "tls" else {}
+                              }
+                          }]
+                      })]
+                      result = subprocess.run(cmd, timeout=10, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                      return result.returncode == 0
+
+                  elif protocol == "vmess":
+                      config = parse_vmess(proxy_link)
+                      cmd = ["v2ray", "tun", "-config", json.dumps({
+                          "inbounds": [{"tag": "in", "port": 1080 + hash(proxy_link) % 1000, "listen": "127.0.0.1", "protocol": "socks"}],
+                          "outbounds": [{
+                              "protocol": "vmess",
+                              "settings": {
+                                  "vnext": [{
+                                      "address": config["add"],
+                                      "port": config["port"],
+                                      "users": [{"id": config["id"], "alterId": config["aid"], "security": config["scy"]}]
+                                  }]
+                              },
+                              "streamSettings": {
+                                  "network": config.get("net", "tcp"),
+                                  "security": config.get("type", "none"),
+                                  "tlsSettings": {"insecure": True} if config.get("tls") == "tls" else {}
+                              }
+                          }]
+                      })]
+                      result = subprocess.run(cmd, timeout=10, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                      return result.returncode == 0
+
+                  elif protocol == "shadowsocks":
+                      config = parse_shadowsocks(proxy_link)
+                      port = 1080 + hash(proxy_link) % 1000
+                      cmd = ["ss-local", "-s", config["server"], "-p", config["server_port"], "-k", config["password"], "-m", config["method"], "-l", str(port)]
+                      result = subprocess.run(cmd, timeout=10, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                      return result.returncode == 0
+
+                  elif protocol == "trojan":
+                      config = parse_trojan(proxy_link)
+                      port = 1080 + hash(proxy_link) % 1000
+                      cmd = ["trojan", "-t", "10", "-p", str(port), "-r", f"{config['server']}:{config['server_port']}", "-w", config["password"]]
+                      result = subprocess.run(cmd, timeout=10, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                      return result.returncode == 0
+
+                  else:
+                      print(f"🚫 不支持的协议: {protocol}")
+                      return False
+
+              except Exception as e:
+                  print(f"❌ 测试失败: {str(e)}")
+                  return False
+
+          def main():
+              input_file = sys.argv[1]
+              output_file = sys.argv[2]
+
+              with open(input_file, 'r') as f_in:
+                  proxies = [line.strip() for line in f_in if line.strip()]
+
+              valid_proxies = []
+              with ThreadPoolExecutor(max_workers=10) as executor:
+                  future_to_proxy = {executor.submit(test_proxy, proxy): proxy for proxy in proxies}
+                  for future in as_completed(future_to_proxy):
+                      proxy = future_to_proxy[future]
+                      try:
+                          if future.result():
+                              valid_proxies.append(proxy)
+                      except Exception as e:
+                          print(f"❌ 异常: {str(e)}")
+
+              with open(output_file, 'w') as f_out:
+                  f_out.write('\n'.join(valid_proxies))
+
+              print(f"✅ 成功验证 {len(valid_proxies)} 个有效代理 (共 {len(proxies)} 个)")
+
+          if __name__ == "__main__":
+              main()
+          EOL
+
+          python test_proxies.py proxies/decoded.txt proxies/valid_proxies.txt
+
+      - name: 🔁 重新加密有效代理
+        run: |
+          if [ ! -f proxies/valid_proxies.txt ]; then
+            echo "❌ 未找到有效代理文件"
+            exit 1
+          fi
+
+          base64 proxies/valid_proxies.txt > proxies/proxy-useful.txt
+          echo "✅ 已生成 Base64 编码的 proxy-useful.txt"
+
+          base64 proxies/valid_proxies.txt > proxies/encoded2.txt
+          echo "✅ 已更新加密后的 encoded.txt"
+
+      - name: 💾 提交更新到仓库
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"
+
+          git add proxies/encoded2.txt
+          git add proxies/proxy-useful.txt
+          git commit -m "✅ 更新有效代理列表"
+          git push origin main
+
+      - name: 📢 发送完成通知
+        if: always()
+        run: |
+          echo "🎉 工作流执行完成"
+          echo "有效代理数量: $(wc -l < proxies/valid_proxies.txt)"
