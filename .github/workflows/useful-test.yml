@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate-proxies:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # 改用Ubuntu 22.04长期支持版
 
     steps:
       - name: 📥 获取代码
