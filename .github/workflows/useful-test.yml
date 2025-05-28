@@ -26,7 +26,8 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y software-properties-common
-          sudo add-apt-repository ppa:max-c-lv/shadowsocks-libev -y
+          # 替换为官方推荐的安装方式
+          sudo add-apt-repository ppa:shadowsocks-rm/shadowsocks-ppa -y
           sudo apt update
           sudo apt install -y v2ray-core trojan shadowsocks-libev
           pip install requests concurrent.futures
