@@ -1,0 +1,111 @@
+name: Process Proxy Subscription
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 每小时执行一次
+  workflow_dispatch:     # 手动触发
+
+jobs:
+  process-subscription:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Get Base64 encoded content from URL
+        env:
+          ENCODED_CONTENT_URL: "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2"  # 替换为实际链接
+        run: |
+          # 1. 从链接获取Base64编码的原始内容
+          curl -sL "$ENCODED_CONTENT_URL" > base64_encoded.txt
+
+          # 2. 解码Base64内容到 external_decoded.txt
+          cat base64_encoded.txt | base64 -d > external_decoded.txt
+
+          # 3. 验证解码后的内容是否有效
+          if [ ! -s external_decoded.txt ]; then
+            echo "错误：解码后的内容为空或格式错误"
+            exit 1
+          fi
+
+          # 可选：显示前几行内容进行调试
+          head -n 3 external_decoded.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Process and encode
+        run: |
+          # 创建 proxies 目录（如果不存在）
+          mkdir -p proxies
+
+          # 过滤 Hysteria2 并 Base64 编码的 Python 脚本
+          python - <<EOF
+          import base64
+          import re
+
+          with open('external_decoded.txt', 'r') as f:
+              lines = f.read().splitlines()
+
+          # 过滤掉以 hysteria2:// 开头的行
+          filtered_content = [
+              line for line in lines 
+              if not line.strip().lower().startswith('hysteria2://')
+          ]
+
+          # 分离包含 "speednode" 的行（不区分大小写）
+          speednode_lines = []
+          normal_lines = []
+
+          for line in filtered_content:
+              if re.search(r'#.*speednode', line, re.IGNORECASE):  # 匹配 fragment 中的 #speednode
+                  speednode_lines.append(line)
+              else:
+                  normal_lines.append(line)
+
+          # Base64 编码并写入文件
+          with open('proxies/v2rayn-speednode.txt', 'w') as f:
+              f.write(base64.b64encode('\n'.join(speednode_lines).encode()).decode())
+
+          with open('proxies/v2rayn.txt', 'w') as f:
+              f.write(base64.b64encode('\n'.join(normal_lines).encode()).decode())
+          EOF
+
+          # 验证文件是否生成
+          ls -l proxies/v2rayn-speednode.txt proxies/v2rayn.txt
+
+      - name: Show files
+        run: |
+          # 显示工作目录内容，确认文件存在
+          tree .
+          echo "v2rayn-speednode.txt 内容："
+          cat proxies/v2rayn-speednode.txt
+          echo "v2rayn.txt 内容："
+          cat proxies/v2rayn.txt
+
+      - name: Commit and push
+        env:
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+        run: |
+          git config --global user.name "DSLZL"
+          git config --global user.email "q2891362919@163.com"
+
+          # 显示变更差异（调试用）
+          git status
+          git diff --staged
+
+          # 强制使用认证URL进行推送
+          git remote set-url origin $REPO_URL
+
+          # 添加文件并提交
+          git add proxies/v2rayn-speednode.txt proxies/v2rayn.txt
+          if git diff --cached --quiet; then
+            echo "没有需要提交的变更"
+          else
+            git commit -m "自动更新代理订阅（分离 speednode 节点） [skip ci]"
+            git push origin HEAD:${GITHUB_REF#refs/heads/}
+          fi
